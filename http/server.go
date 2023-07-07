@@ -12,7 +12,7 @@ type ServerController interface {
 	BindAddress() string
 	RequestHandler(url []string) RequestHandlerFunc
 	SessionCookieName() string
-	User(name string) User
+	Login(user, password string) User
 }
 
 type User interface {

@@ -8,15 +8,17 @@ import (
 	"github.com/pjsaksa/go-utils/log"
 )
 
-func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request, urlParts []string, user User) log.Message {
+func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request, urlParts []string, activeUser User) log.Message {
 	switch req.Method {
 	case "POST":
-		if username := req.PostFormValue("u"); username != "" {
-			// Protect shared parts
-			srv.sessionsMutex.Lock()
-			defer srv.sessionsMutex.Unlock()
+		u := req.PostFormValue("user")
+		p := req.PostFormValue("password")
+		if u != "" {
+			if user := srv.ctrl.Login(u, p); user != nil {
+				// Protect shared parts
+				srv.sessionsMutex.Lock()
+				defer srv.sessionsMutex.Unlock()
 
-			if user := srv.ctrl.User(username); user != nil {
 				token := newSessionToken()
 				srv.sessions[token] = user
 				go_http.SetCookie(out, &go_http.Cookie{
@@ -26,14 +28,11 @@ func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request, ur
 				})
 
 				go_http.Redirect(out, req, "/u/", go_http.StatusSeeOther)
-				return log.InfoMsg("Sign-in '%s'", username)
-			} else {
-				go_http.Error(out, "Forbidden", go_http.StatusForbidden)
-				return log.ErrorMsg("Invalid sign-in '%s'", username)
+				return log.InfoMsg("Sign-in '%s'", u)
 			}
 		}
-		go_http.NotFound(out, req)
-		return log.WarningMsg("Not Found")
+		go_http.Error(out, "Forbidden", go_http.StatusForbidden)
+		return log.ErrorMsg("Invalid sign-in '%s'", u)
 
 	default:
 		out.Header().Add("Allow", "GET")
