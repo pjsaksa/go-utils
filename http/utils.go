@@ -8,6 +8,8 @@ import (
 	"github.com/pjsaksa/go-utils/log"
 )
 
+var StaticDirectory = "static"
+
 func ServeStaticFile(fileName, contentType string, maxAge int) RequestHandlerFunc {
 	return func(out go_http.ResponseWriter, req *go_http.Request, urlParts []string, user User) log.Message {
 		switch req.Method {
@@ -16,7 +18,7 @@ func ServeStaticFile(fileName, contentType string, maxAge int) RequestHandlerFun
 			if maxAge > 0 {
 				out.Header().Set("Cache-Control", fmt.Sprintf("max-age=%d", maxAge))
 			}
-			go_http.ServeFile(out, req, "static/"+fileName)
+			go_http.ServeFile(out, req, StaticDirectory+"/"+fileName)
 			return log.DebugMsg("Ok")
 		default:
 			out.Header().Add("Allow", "GET")
