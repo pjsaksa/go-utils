@@ -3,7 +3,6 @@ package http
 import (
 	go_http "net/http"
 	"sync"
-	"time"
 
 	"github.com/pjsaksa/go-utils/log"
 )
@@ -37,8 +36,6 @@ func NewServer(ctrl ServerController) *Server {
 	srv.httpServer = go_http.Server{
 		Addr:           srv.ctrl.BindAddress(),
 		Handler:        srv,
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 15,
 	}
 	return srv
