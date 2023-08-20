@@ -27,14 +27,14 @@ func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request) lo
 						break
 					}
 				}
-
 				srv.sessions[token] = user
+				srv.ctrl.AddSession(token, srv.sessions)
+
 				go_http.SetCookie(out, &go_http.Cookie{
 					Name:  srv.ctrl.SessionCookieName(),
 					Value: token,
 					Path:  "/",
 				})
-
 				go_http.Redirect(out, req, "/u/", go_http.StatusSeeOther)
 				return log.InfoMsg("Sign-in '%s'", u)
 			}
@@ -57,6 +57,7 @@ func (srv *Server) doSignOut(out go_http.ResponseWriter, req *go_http.Request, a
 		defer srv.sessionsMutex.Unlock()
 
 		delete(srv.sessions, activeCookie)
+		srv.ctrl.DeleteSession(activeCookie, srv.sessions)
 
 		go_http.SetCookie(out, &go_http.Cookie{
 			Name:   srv.ctrl.SessionCookieName(),

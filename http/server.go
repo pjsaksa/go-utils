@@ -9,29 +9,38 @@ import (
 
 type ServerController interface {
 	BindAddress() string
-	RequestHandler(url []string) RequestHandlerFunc
 	SessionCookieName() string
+
 	Login(user, password string) User
+	RequestHandler(url []string) RequestHandlerFunc
+
+	AddSession(string, SessionMap)
+	DeleteSession(string, SessionMap)
+	LoadSessions(SessionMap)
 }
 
 type User interface {
 	Username() string
 }
 
+type SessionMap map[string]User
+
 // ------------------------------------------------------------
 
 type Server struct {
 	httpServer    go_http.Server
-	sessions      map[string]User
+	sessions      SessionMap
 	sessionsMutex sync.RWMutex
 	ctrl          ServerController
 }
 
 func NewServer(ctrl ServerController) *Server {
 	srv := &Server{
-		sessions: map[string]User{},
+		sessions: SessionMap{},
 		ctrl:     ctrl,
 	}
+
+	ctrl.LoadSessions(srv.sessions)
 
 	srv.httpServer = go_http.Server{
 		Addr:           srv.ctrl.BindAddress(),
