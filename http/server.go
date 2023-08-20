@@ -62,10 +62,11 @@ func (srv *Server) ServeHTTP(out go_http.ResponseWriter, req *go_http.Request) {
 	}(&reqMsg, &respMsg)
 
 	// Check if request contains session information.
+	var sessionCookie string
 	var sessionUser User
 	{
 		var sessionFound bool
-		sessionFound, sessionUser = srv.getOpenSession(out, req)
+		sessionFound, sessionUser, sessionCookie = srv.getOpenSession(out, req)
 
 		if sessionFound && sessionUser == nil {
 			// Active session has been expired. Request has already been redirected.
@@ -91,12 +92,12 @@ func (srv *Server) ServeHTTP(out go_http.ResponseWriter, req *go_http.Request) {
 		}
 
 		if UrlPartsMatch(urlParts, "u", "sign-out") {
-			respMsg = srv.doSignOut(out, req, urlParts, sessionUser)
+			respMsg = srv.doSignOut(out, req, sessionUser, sessionCookie)
 			return
 		}
 	} else {
 		if UrlPartsMatch(urlParts, "sign-in") {
-			respMsg = srv.doSignIn(out, req, urlParts, sessionUser)
+			respMsg = srv.doSignIn(out, req)
 			return
 		}
 	}

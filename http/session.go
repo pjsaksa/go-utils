@@ -8,7 +8,7 @@ import (
 	"github.com/pjsaksa/go-utils/log"
 )
 
-func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request, urlParts []string, activeUser User) log.Message {
+func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request) log.Message {
 	switch req.Method {
 	case "POST":
 		u := req.PostFormValue("user")
@@ -19,7 +19,15 @@ func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request, ur
 				srv.sessionsMutex.Lock()
 				defer srv.sessionsMutex.Unlock()
 
-				token := newSessionToken()
+				// Create tokens until a fresh one is found
+				var token string
+				for {
+					token = newSessionToken()
+					if _, exists := srv.sessions[token]; !exists {
+						break
+					}
+				}
+
 				srv.sessions[token] = user
 				go_http.SetCookie(out, &go_http.Cookie{
 					Name:  srv.ctrl.SessionCookieName(),
@@ -41,18 +49,14 @@ func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request, ur
 	}
 }
 
-func (srv *Server) doSignOut(out go_http.ResponseWriter, req *go_http.Request, urlParts []string, activeUser User) log.Message {
+func (srv *Server) doSignOut(out go_http.ResponseWriter, req *go_http.Request, activeUser User, activeCookie string) log.Message {
 	switch req.Method {
 	case "POST":
 		// Protect shared parts
 		srv.sessionsMutex.Lock()
 		defer srv.sessionsMutex.Unlock()
 
-		for token, user := range srv.sessions {
-			if user == activeUser {
-				delete(srv.sessions, token)
-			}
-		}
+		delete(srv.sessions, activeCookie)
 
 		go_http.SetCookie(out, &go_http.Cookie{
 			Name:   srv.ctrl.SessionCookieName(),
@@ -60,7 +64,6 @@ func (srv *Server) doSignOut(out go_http.ResponseWriter, req *go_http.Request, u
 			Path:   "/",
 			MaxAge: -1,
 		})
-
 		go_http.Redirect(out, req, "/", go_http.StatusSeeOther)
 		return log.InfoMsg("Sign-out: " + activeUser.Username())
 
@@ -71,7 +74,7 @@ func (srv *Server) doSignOut(out go_http.ResponseWriter, req *go_http.Request, u
 	}
 }
 
-func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Request) (bool, User) {
+func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Request) (bool, User, string) {
 	if cookie, err := req.Cookie(srv.ctrl.SessionCookieName()); err != go_http.ErrNoCookie && cookie != nil && len(cookie.Value) > 0 {
 		// Protect shared parts
 		srv.sessionsMutex.RLock()
@@ -79,7 +82,7 @@ func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Reque
 
 		user, ok := srv.sessions[cookie.Value]
 		if ok && user != nil {
-			return true, user
+			return true, user, cookie.Value
 		} else {
 			go_http.SetCookie(out, &go_http.Cookie{
 				Name:   srv.ctrl.SessionCookieName(),
@@ -89,11 +92,11 @@ func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Reque
 			})
 
 			go_http.Redirect(out, req, "/", go_http.StatusSeeOther)
-			return true, nil
+			return true, nil, ""
 		}
 	}
 
-	return false, nil
+	return false, nil, ""
 }
 
 // ------------------------------------------------------------
