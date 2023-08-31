@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	go_http "net/http"
+	"time"
 
 	"github.com/pjsaksa/go-utils/log"
 )
@@ -15,25 +16,33 @@ func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request) lo
 		p := req.PostFormValue("password")
 		if u != "" {
 			if user := srv.ctrl.Login(u, p); user != nil {
-				// Protect shared parts
-				srv.sessionsMutex.Lock()
-				defer srv.sessionsMutex.Unlock()
-
-				// Create tokens until a fresh one is found
 				var token string
-				for {
-					token = newSessionToken()
-					if _, exists := srv.sessions[token]; !exists {
-						break
+
+				// Mutex-zone
+				func() {
+					srv.sessionsMutex.Lock()
+					defer srv.sessionsMutex.Unlock()
+
+					// Create tokens until a fresh one is found
+					for {
+						token = newSessionToken()
+						if _, exists := srv.sessions[token]; !exists {
+							break
+						}
 					}
-				}
-				srv.sessions[token] = user
-				srv.ctrl.AddSession(token, srv.sessions)
+
+					srv.sessions[token] = &Session{
+						User:        user,
+						RefreshTime: time.Now(),
+					}
+					srv.ctrl.RefreshSession(token, srv.sessions)
+				}()
 
 				go_http.SetCookie(out, &go_http.Cookie{
-					Name:  srv.ctrl.SessionCookieName(),
-					Value: token,
-					Path:  "/",
+					Name:   srv.ctrl.SessionCookieName(),
+					Value:  token,
+					Path:   "/",
+					MaxAge: int(srv.ctrl.SessionMaxAge().Seconds()),
 				})
 				go_http.Redirect(out, req, "/u/", go_http.StatusSeeOther)
 				return log.InfoMsg("Sign-in '%s'", u)
@@ -52,12 +61,14 @@ func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request) lo
 func (srv *Server) doSignOut(out go_http.ResponseWriter, req *go_http.Request, activeUser User, activeCookie string) log.Message {
 	switch req.Method {
 	case "POST":
-		// Protect shared parts
-		srv.sessionsMutex.Lock()
-		defer srv.sessionsMutex.Unlock()
+		// Mutex-zone
+		func() {
+			srv.sessionsMutex.Lock()
+			defer srv.sessionsMutex.Unlock()
 
-		delete(srv.sessions, activeCookie)
-		srv.ctrl.DeleteSession(activeCookie, srv.sessions)
+			delete(srv.sessions, activeCookie)
+			srv.ctrl.RefreshSession(activeCookie, srv.sessions)
+		}()
 
 		go_http.SetCookie(out, &go_http.Cookie{
 			Name:   srv.ctrl.SessionCookieName(),
@@ -77,14 +88,52 @@ func (srv *Server) doSignOut(out go_http.ResponseWriter, req *go_http.Request, a
 
 func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Request) (bool, User, string) {
 	if cookie, err := req.Cookie(srv.ctrl.SessionCookieName()); err != go_http.ErrNoCookie && cookie != nil && len(cookie.Value) > 0 {
-		// Protect shared parts
-		srv.sessionsMutex.RLock()
-		defer srv.sessionsMutex.RUnlock()
+		srv.sessionsMutex.Lock()
+		defer srv.sessionsMutex.Unlock()
 
-		user, ok := srv.sessions[cookie.Value]
-		if ok && user != nil {
-			return true, user, cookie.Value
+		session, ok := srv.sessions[cookie.Value]
+
+		if ok && session == nil {
+			// SessionMap contains invalid entry. If this happens, make noise
+			// because it's better to find out what causes it.
+
+			log.ERROR(`http.Server: "sessions" had nil entry: %s`, cookie.Value)
+
+			// Delete invalid session entry
+			delete(srv.sessions, cookie.Value)
+			srv.ctrl.RefreshSession(cookie.Value, srv.sessions)
+
+			ok = false
+		}
+
+		if ok && time.Since(session.RefreshTime) > srv.ctrl.SessionMaxAge() {
+			// Session has expired
+
+			log.INFO("Session expired '%s'", session.User.Username())
+
+			ok = false
+		}
+
+		if ok {
+			// Refresh session, unless it's fresh enough
+			if time.Since(session.RefreshTime) > time.Hour {
+				session.RefreshTime = time.Now()
+				srv.ctrl.RefreshSession(cookie.Value, srv.sessions)
+
+				go_http.SetCookie(out, &go_http.Cookie{
+					Name:   srv.ctrl.SessionCookieName(),
+					Value:  cookie.Value,
+					Path:   "/",
+					MaxAge: int(srv.ctrl.SessionMaxAge().Seconds()),
+				})
+			}
+
+			// Return valid user information
+			return true, session.User, cookie.Value
 		} else {
+			// Request had session cookie but one of the above things caused the
+			// session to fail
+
 			go_http.SetCookie(out, &go_http.Cookie{
 				Name:   srv.ctrl.SessionCookieName(),
 				Value:  "",

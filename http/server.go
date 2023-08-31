@@ -3,6 +3,7 @@ package http
 import (
 	go_http "net/http"
 	"sync"
+	"time"
 
 	"github.com/pjsaksa/go-utils/log"
 )
@@ -14,23 +15,28 @@ type ServerController interface {
 	Login(user, password string) User
 	RequestHandler(url []string) RequestHandlerFunc
 
-	AddSession(string, SessionMap)
-	DeleteSession(string, SessionMap)
+	RefreshSession(string, SessionMap)
 	LoadSessions(SessionMap)
+	SessionMaxAge() time.Duration
 }
 
 type User interface {
 	Username() string
 }
 
-type SessionMap map[string]User
+type Session struct {
+	User        User
+	RefreshTime time.Time
+}
+
+type SessionMap map[string]*Session
 
 // ------------------------------------------------------------
 
 type Server struct {
 	httpServer    go_http.Server
 	sessions      SessionMap
-	sessionsMutex sync.RWMutex
+	sessionsMutex sync.Mutex
 	ctrl          ServerController
 }
 
