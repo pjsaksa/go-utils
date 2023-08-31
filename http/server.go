@@ -11,13 +11,13 @@ import (
 type ServerController interface {
 	BindAddress() string
 	SessionCookieName() string
+	SessionMaxAge() time.Duration
 
-	Login(user, password string) User
 	RequestHandler(url []string) RequestHandlerFunc
 
-	RefreshSession(string, SessionMap)
+	Login(user, password string) User
 	LoadSessions(SessionMap)
-	SessionMaxAge() time.Duration
+	RefreshSession(string, SessionMap)
 }
 
 type User interface {
@@ -34,16 +34,16 @@ type SessionMap map[string]*Session
 // ------------------------------------------------------------
 
 type Server struct {
+	ctrl          ServerController
 	httpServer    go_http.Server
 	sessions      SessionMap
 	sessionsMutex sync.Mutex
-	ctrl          ServerController
 }
 
 func NewServer(ctrl ServerController) *Server {
 	srv := &Server{
-		sessions: SessionMap{},
 		ctrl:     ctrl,
+		sessions: SessionMap{},
 	}
 
 	ctrl.LoadSessions(srv.sessions)
@@ -93,7 +93,7 @@ func (srv *Server) ServeHTTP(out go_http.ResponseWriter, req *go_http.Request) {
 	urlParts := splitUrlPath(req.URL.EscapedPath())
 	if urlParts == nil || len(urlParts) == 0 {
 		go_http.Error(out, "Invalid URL", go_http.StatusBadRequest)
-		respMsg = log.WarningMsg("Invalid URL \"%s\"", req.URL.EscapedPath())
+		respMsg = log.WarningMsg(`Invalid URL "%s"`, req.URL.EscapedPath())
 		return
 	}
 

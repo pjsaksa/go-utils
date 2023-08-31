@@ -94,9 +94,8 @@ func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Reque
 		session, ok := srv.sessions[cookie.Value]
 
 		if ok && session == nil {
-			// SessionMap contains invalid entry. If this happens, make noise
-			// because it's better to find out what causes it.
-
+			// SessionMap contains nil entry. Make noise because this needs to
+			// be tracked down.
 			log.ERROR(`http.Server: "sessions" had nil entry: %s`, cookie.Value)
 
 			// Delete invalid session entry
@@ -108,14 +107,13 @@ func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Reque
 
 		if ok && time.Since(session.RefreshTime) > srv.ctrl.SessionMaxAge() {
 			// Session has expired
-
 			log.INFO("Session expired '%s'", session.User.Username())
 
 			ok = false
 		}
 
 		if ok {
-			// Refresh session, unless it's fresh enough
+			// Refresh session (unless it's fresh enough)
 			if time.Since(session.RefreshTime) > time.Hour {
 				session.RefreshTime = time.Now()
 				srv.ctrl.RefreshSession(cookie.Value, srv.sessions)
@@ -131,8 +129,8 @@ func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Reque
 			// Return valid user information
 			return true, session.User, cookie.Value
 		} else {
-			// Request had session cookie but one of the above things caused the
-			// session to fail
+			// Request had session cookie but one of the above checks caused the
+			// session to be rejected
 
 			go_http.SetCookie(out, &go_http.Cookie{
 				Name:   srv.ctrl.SessionCookieName(),
