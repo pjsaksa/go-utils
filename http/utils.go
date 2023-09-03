@@ -30,6 +30,15 @@ func ServeStaticFile(fileName, contentType string, maxAge int) RequestHandlerFun
 
 // ------------------------------------------------------------
 
+func RequireUser(user User) {
+	if user == nil {
+		panic(HttpError{
+			Message: "Forbidden",
+			Status:  go_http.StatusForbidden,
+		})
+	}
+}
+
 func RequireEmptyContent(req *go_http.Request) {
 	if req.ContentLength > 0 {
 		panic(HttpError{
