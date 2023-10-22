@@ -63,6 +63,13 @@ func (srv *Server) Start() {
 	}
 }
 
+func (srv *Server) StartTLS(certFile, keyFile string) {
+	log.INFO("Listening HTTPS at %s", srv.httpServer.Addr)
+	if err := srv.httpServer.ListenAndServeTLS(certFile, keyFile); err != go_http.ErrServerClosed {
+		panic(err.Error())
+	}
+}
+
 func (srv *Server) ServeHTTP(out go_http.ResponseWriter, req *go_http.Request) {
 	// Initialize log messages.
 	reqMsg := log.EventMsg(
