@@ -13,7 +13,7 @@ type ServerController interface {
 	SessionCookieName() string
 	SessionMaxAge() time.Duration
 
-	RequestHandler(url []string) RequestHandlerFunc
+	RequestHandler(url []string, user User) RequestHandlerFunc
 
 	Login(user, password string) User
 	LoadSessions(SessionMap)
@@ -124,7 +124,7 @@ func (srv *Server) ServeHTTP(out go_http.ResponseWriter, req *go_http.Request) {
 		}
 	}
 
-	if handler := srv.ctrl.RequestHandler(urlParts); handler != nil {
+	if handler := srv.ctrl.RequestHandler(urlParts, sessionUser); handler != nil {
 		respMsg = handler.safeCall(out, req, urlParts, sessionUser)
 	} else {
 		go_http.NotFound(out, req)
