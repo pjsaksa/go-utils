@@ -12,6 +12,7 @@ type ServerController interface {
 	BindAddress() string
 	SessionCookieName() string
 	SessionMaxAge() time.Duration
+	ConfigureHttpServer(*go_http.Server)
 
 	RequestHandler(url []string, user User) RequestHandlerFunc
 
@@ -53,6 +54,8 @@ func NewServer(ctrl ServerController) *Server {
 		Handler:        srv,
 		MaxHeaderBytes: 1 << 15,
 	}
+
+	ctrl.ConfigureHttpServer(&srv.httpServer)
 	return srv
 }
 
