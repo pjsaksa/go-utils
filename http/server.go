@@ -14,7 +14,7 @@ type ServerController interface {
 	SessionMaxAge() time.Duration
 	ConfigureHttpServer(*go_http.Server)
 
-	RequestHandler(url []string, user User) RequestHandlerFunc
+	HandleRequest(*go_http.Request, []string, User) Resolution
 
 	Login(user, password string) User
 	LoadSessions(SessionMap)
@@ -73,64 +73,84 @@ func (srv *Server) StartTLS(certFile, keyFile string) {
 	}
 }
 
+// ------------------------------------------------------------
+
 func (srv *Server) ServeHTTP(out go_http.ResponseWriter, req *go_http.Request) {
-	// Initialize log messages.
-	reqMsg := log.EventMsg(
-		"[%s] %s %s %s",
-		req.RemoteAddr,
-		req.Method,
-		req.URL.EscapedPath(),
-		req.URL.RawQuery)
-	respMsg := log.FatalMsg("Handler is missing response log message")
-	defer func(msg1, msg2 *log.Message) {
-		log.LOG(*msg1, *msg2)
-	}(&reqMsg, &respMsg)
+	var cookies []*go_http.Cookie
 
-	// Check if request contains session information.
-	var sessionCookie string
-	var sessionUser User
-	{
-		var sessionFound bool
-		sessionFound, sessionUser, sessionCookie = srv.getOpenSession(out, req)
+	// Handle request
+	resolution := srv.handleRequest(req, &cookies)
 
-		if sessionFound && sessionUser == nil {
-			// Active session has been expired. Request has already been redirected.
-			respMsg = log.WarningMsg("No session found")
-			return
-		}
+	// Produce response
+	for _, c := range cookies {
+		go_http.SetCookie(out, c)
 	}
+	resolution.WriteResponse(out, req)
 
-	urlParts := splitUrlPath(req.URL.EscapedPath())
-	if urlParts == nil || len(urlParts) == 0 {
-		go_http.Error(out, "Invalid URL", go_http.StatusBadRequest)
-		respMsg = log.WarningMsg(`Invalid URL "%s"`, req.URL.EscapedPath())
+	// Print log message
+	log.LOG(
+		log.EventMsg(
+			"[%s] %s %s %s",
+			req.RemoteAddr,
+			req.Method,
+			req.URL.EscapedPath(),
+			req.URL.RawQuery),
+		resolution.LogMessage())
+}
+
+func (srv *Server) handleRequest(req *go_http.Request, cookies *[]*go_http.Cookie) (resolution Resolution) {
+	defer func() {
+		if err := recover(); err != nil {
+			switch errT := err.(type) {
+			case Resolution:
+				resolution = errT
+			default:
+				panic(err)
+			}
+		}
+	}()
+
+	var urlParts []string
+	urlParts, resolution = splitUrlPath(req.URL.EscapedPath())
+	if resolution != nil {
 		return
 	}
+
+	var sessionUser User
+	sessionUser, resolution = srv.handleSessions(urlParts, req, cookies)
+	if resolution != nil {
+		return
+	}
+
+	resolution = srv.ctrl.HandleRequest(req, urlParts, sessionUser)
+	if resolution != nil {
+		return
+	}
+
+	resolution = &ErrorResolution{Status: go_http.StatusNotFound}
+
+	return
+}
+
+func (srv *Server) handleSessions(urlParts []string, req *go_http.Request, cookies *[]*go_http.Cookie) (User, Resolution) {
+	// Check if request contains session information.
+	sessionUser, sessionCookie := srv.getOpenSession(req, cookies)
 
 	if urlParts[0] == "u" {
 		// User-specific page handler.
 
 		if sessionUser == nil {
-			go_http.Error(out, "Forbidden", go_http.StatusForbidden)
-			respMsg = log.ErrorMsg("Forbidden")
-			return
+			return nil, &ErrorResolution{Status: go_http.StatusForbidden}
 		}
 
 		if UrlPartsMatch(urlParts, "u", "sign-out") {
-			respMsg = srv.doSignOut(out, req, sessionUser, sessionCookie)
-			return
+			return nil, srv.doSignOut(req, cookies, sessionUser, sessionCookie)
 		}
 	} else {
 		if UrlPartsMatch(urlParts, "sign-in") {
-			respMsg = srv.doSignIn(out, req)
-			return
+			return nil, srv.doSignIn(req, cookies)
 		}
 	}
 
-	if handler := srv.ctrl.RequestHandler(urlParts, sessionUser); handler != nil {
-		respMsg = handler.safeCall(out, req, urlParts, sessionUser)
-	} else {
-		go_http.NotFound(out, req)
-		respMsg = log.WarningMsg("Not Found")
-	}
+	return sessionUser, nil
 }

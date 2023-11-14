@@ -4,46 +4,19 @@ import (
 	"fmt"
 	"io"
 	go_http "net/http"
-
-	"github.com/pjsaksa/go-utils/log"
 )
-
-var StaticDirectory = "static"
-
-func ServeStaticFile(fileName, contentType string, maxAge int) RequestHandlerFunc {
-	return func(out go_http.ResponseWriter, req *go_http.Request, urlParts []string, user User) log.Message {
-		switch req.Method {
-		case "", "GET":
-			out.Header().Set("Content-Type", contentType)
-			if maxAge > 0 {
-				out.Header().Set("Cache-Control", fmt.Sprintf("max-age=%d", maxAge))
-			}
-			go_http.ServeFile(out, req, StaticDirectory+"/"+fileName)
-			return log.DebugMsg("Ok")
-		default:
-			out.Header().Add("Allow", "GET")
-			go_http.Error(out, "Method Not Allowed", go_http.StatusMethodNotAllowed)
-			return log.WarningMsg("Method Not Allowed (%s)", req.Method)
-		}
-	}
-}
-
-// ------------------------------------------------------------
 
 func RequireUser(user User) {
 	if user == nil {
-		panic(HttpError{
-			Message: "Forbidden",
-			Status:  go_http.StatusForbidden,
-		})
+		panic(&ErrorResolution{Status: go_http.StatusForbidden})
 	}
 }
 
 func RequireEmptyContent(req *go_http.Request) {
 	if req.ContentLength > 0 {
-		panic(HttpError{
-			Message: "Content must be empty",
+		panic(&ErrorResolution{
 			Status:  go_http.StatusRequestEntityTooLarge,
+			Message: "Content must be empty",
 		})
 	}
 }
@@ -51,29 +24,23 @@ func RequireEmptyContent(req *go_http.Request) {
 func ReadContent(req *go_http.Request, max int64) []byte {
 	switch {
 	case req.ContentLength < 0:
-		panic(HttpError{
-			Message: "Content length required",
-			Status:  go_http.StatusLengthRequired,
-		})
+		panic(&ErrorResolution{Status: go_http.StatusLengthRequired})
 	case req.ContentLength > max:
-		panic(HttpError{
-			Message: "Content too large",
-			Status:  go_http.StatusRequestEntityTooLarge,
-		})
+		panic(&ErrorResolution{Status: go_http.StatusRequestEntityTooLarge})
 	}
 
 	inputBytes := make([]byte, req.ContentLength)
 	inputBytes_n, err := io.ReadFull(req.Body, inputBytes)
 	switch {
 	case err != nil:
-		panic(HttpError{
-			Message: fmt.Sprintf("Reading payload failed (%s)", err.Error()),
+		panic(&ErrorResolution{
 			Status:  go_http.StatusInternalServerError,
+			Message: fmt.Sprintf("Reading payload failed (%s)", err.Error()),
 		})
 	case int64(inputBytes_n) != req.ContentLength:
-		panic(HttpError{
-			Message: fmt.Sprintf("Reading payload failed (%d bytes < %d bytes)", inputBytes_n, req.ContentLength),
+		panic(&ErrorResolution{
 			Status:  go_http.StatusInternalServerError,
+			Message: fmt.Sprintf("Reading payload failed (%d bytes < %d bytes)", inputBytes_n, req.ContentLength),
 		})
 	}
 

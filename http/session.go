@@ -3,100 +3,108 @@ package http
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	go_http "net/http"
 	"time"
 
 	"github.com/pjsaksa/go-utils/log"
 )
 
-func (srv *Server) doSignIn(out go_http.ResponseWriter, req *go_http.Request) log.Message {
-	switch req.Method {
-	case "POST":
-		u := req.PostFormValue("user")
-		p := req.PostFormValue("password")
-		if u != "" {
-			if user := srv.ctrl.Login(u, p); user != nil {
-				var token string
+func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Resolution {
+	if req.Method != "POST" {
+		return &MethodNotAllowedResolution{Allowed: "POST"}
+	}
 
-				// Mutex-zone
-				func() {
-					srv.sessionsMutex.Lock()
-					defer srv.sessionsMutex.Unlock()
+	u := req.PostFormValue("user")
+	p := req.PostFormValue("password")
+	if u != "" {
+		if user := srv.ctrl.Login(u, p); user != nil {
+			var token string
 
-					// Create tokens until a fresh one is found
-					for {
-						token = newSessionToken()
-						if _, exists := srv.sessions[token]; !exists {
-							break
-						}
+			// Mutex-zone
+			func() {
+				srv.sessionsMutex.Lock()
+				defer srv.sessionsMutex.Unlock()
+
+				// Create tokens until a fresh one is found
+				for {
+					token = newSessionToken()
+					if _, exists := srv.sessions[token]; !exists {
+						break
 					}
+				}
 
-					srv.sessions[token] = &Session{
-						User:        user,
-						RefreshTime: time.Now(),
-					}
-					srv.ctrl.RefreshSession(token, srv.sessions)
-				}()
+				srv.sessions[token] = &Session{
+					User:        user,
+					RefreshTime: time.Now(),
+				}
+				srv.ctrl.RefreshSession(token, srv.sessions)
+			}()
 
-				go_http.SetCookie(out, &go_http.Cookie{
-					Name:   srv.ctrl.SessionCookieName(),
-					Value:  token,
-					Path:   "/",
-					MaxAge: int(srv.ctrl.SessionMaxAge().Seconds()),
-				})
-				go_http.Redirect(out, req, "/u/", go_http.StatusSeeOther)
-				return log.InfoMsg("Sign-in '%s'", u)
+			log.INFO("Sign-in '%s'", u)
+
+			*cookies = append(*cookies, &go_http.Cookie{
+				Name:   srv.ctrl.SessionCookieName(),
+				Value:  token,
+				Path:   "/",
+				MaxAge: int(srv.ctrl.SessionMaxAge().Seconds()),
+			})
+
+			return &RedirectResolution{
+				Status: go_http.StatusSeeOther,
+				Url:    "/u/",
 			}
 		}
-		go_http.Error(out, "Forbidden", go_http.StatusForbidden)
-		return log.ErrorMsg("Invalid sign-in '%s'", u)
-
-	default:
-		out.Header().Add("Allow", "GET")
-		go_http.Error(out, "Method Not Allowed", go_http.StatusMethodNotAllowed)
-		return log.WarningMsg("Method Not Allowed (%s)", req.Method)
+	}
+	return &ErrorResolution{
+		Status:  go_http.StatusForbidden,
+		Message: fmt.Sprintf("Invalid sign-in '%s'", u),
 	}
 }
 
-func (srv *Server) doSignOut(out go_http.ResponseWriter, req *go_http.Request, activeUser User, activeCookie string) log.Message {
-	switch req.Method {
-	case "POST":
-		// Mutex-zone
-		func() {
-			srv.sessionsMutex.Lock()
-			defer srv.sessionsMutex.Unlock()
+func (srv *Server) doSignOut(req *go_http.Request, cookies *[]*go_http.Cookie, activeUser User, activeCookie string) Resolution {
+	if req.Method != "POST" {
+		return &MethodNotAllowedResolution{Allowed: "POST"}
+	}
 
-			delete(srv.sessions, activeCookie)
-			srv.ctrl.RefreshSession(activeCookie, srv.sessions)
-		}()
+	// Mutex-zone
+	func() {
+		srv.sessionsMutex.Lock()
+		defer srv.sessionsMutex.Unlock()
 
-		go_http.SetCookie(out, &go_http.Cookie{
-			Name:   srv.ctrl.SessionCookieName(),
-			Value:  "",
-			Path:   "/",
-			MaxAge: -1,
-		})
-		go_http.Redirect(out, req, "/", go_http.StatusSeeOther)
-		return log.InfoMsg("Sign-out: " + activeUser.Username())
+		delete(srv.sessions, activeCookie)
+		srv.ctrl.RefreshSession(activeCookie, srv.sessions)
+	}()
 
-	default:
-		out.Header().Add("Allow", "GET")
-		go_http.Error(out, "Method Not Allowed", go_http.StatusMethodNotAllowed)
-		return log.WarningMsg("Method Not Allowed (%s)", req.Method)
+	log.INFO("Sign-out '%s'", activeUser.Username())
+
+	*cookies = append(*cookies, &go_http.Cookie{
+		Name:   srv.ctrl.SessionCookieName(),
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+
+	return &RedirectResolution{
+		Status: go_http.StatusSeeOther,
+		Url:    "/",
 	}
 }
 
-func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Request) (bool, User, string) {
+func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cookie) (User, string) {
 	if cookie, err := req.Cookie(srv.ctrl.SessionCookieName()); err != go_http.ErrNoCookie && cookie != nil && len(cookie.Value) > 0 {
 		srv.sessionsMutex.Lock()
 		defer srv.sessionsMutex.Unlock()
 
 		session, ok := srv.sessions[cookie.Value]
+		if !ok {
+			log.WARNING("Requested session not found")
+		}
 
 		if ok && session == nil {
 			// SessionMap contains nil entry. Make noise because this needs to
 			// be tracked down.
-			log.ERROR(`http.Server: "sessions" had nil entry: %s`, cookie.Value)
+			log.ERROR(`http.Server.getOpenSession: "sessions" had nil entry: %s`, cookie.Value)
 
 			// Delete invalid session entry
 			delete(srv.sessions, cookie.Value)
@@ -118,7 +126,7 @@ func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Reque
 				session.RefreshTime = time.Now()
 				srv.ctrl.RefreshSession(cookie.Value, srv.sessions)
 
-				go_http.SetCookie(out, &go_http.Cookie{
+				*cookies = append(*cookies, &go_http.Cookie{
 					Name:   srv.ctrl.SessionCookieName(),
 					Value:  cookie.Value,
 					Path:   "/",
@@ -127,24 +135,26 @@ func (srv *Server) getOpenSession(out go_http.ResponseWriter, req *go_http.Reque
 			}
 
 			// Return valid user information
-			return true, session.User, cookie.Value
+			return session.User, cookie.Value
 		} else {
-			// Request had session cookie but one of the above checks caused the
-			// session to be rejected
+			// Request contained a session cookie but one of the above checks
+			// caused the session to be rejected
 
-			go_http.SetCookie(out, &go_http.Cookie{
+			*cookies = append(*cookies, &go_http.Cookie{
 				Name:   srv.ctrl.SessionCookieName(),
 				Value:  "",
 				Path:   "/",
 				MaxAge: -1,
 			})
 
-			go_http.Redirect(out, req, "/", go_http.StatusSeeOther)
-			return true, nil, ""
+			panic(&RedirectResolution{
+				Status: go_http.StatusSeeOther,
+				Url:    "/",
+			})
 		}
 	}
 
-	return false, nil, ""
+	return nil, ""
 }
 
 // ------------------------------------------------------------
@@ -158,9 +168,15 @@ func newSessionToken() string {
 	n, err := rand.Read(data[:])
 	switch {
 	case err != nil:
-		panic(err.Error())
+		panic(&ErrorResolution{
+			Status:  go_http.StatusInternalServerError,
+			Message: fmt.Sprintf("http.newSessionToken: %s", err.Error()),
+		})
 	case n != sessionTokenSize:
-		panic("newSessionToken(): invalid number of output bytes")
+		panic(&ErrorResolution{
+			Status:  go_http.StatusInternalServerError,
+			Message: fmt.Sprintf("http.newSessionToken: invalid number of output bytes"),
+		})
 	}
 
 	return base64.StdEncoding.EncodeToString(data[:])

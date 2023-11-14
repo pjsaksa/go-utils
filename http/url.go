@@ -1,6 +1,10 @@
 package http
 
-import "strings"
+import (
+	"fmt"
+	go_http "net/http"
+	"strings"
+)
 
 func UrlPartsMatch(url []string, match ...string) bool {
 	if len(url) != len(match) {
@@ -20,9 +24,16 @@ func UrlPartsMatch(url []string, match ...string) bool {
 
 // ------------------------------------------------------------
 
-func splitUrlPath(url string) []string {
-	if len(url) < 1 || url[0] != '/' {
-		return nil
+func splitUrlPath(url string) ([]string, Resolution) {
+	var urlParts []string
+	if len(url) > 0 && url[0] == '/' {
+		urlParts = strings.Split(url, "/")[1:]
 	}
-	return strings.Split(url, "/")[1:]
+	if urlParts == nil || len(urlParts) == 0 {
+		return nil, &ErrorResolution{
+			Status:  go_http.StatusBadRequest,
+			Message: fmt.Sprintf(`http.splitUrlPath: Invalid URL '%s'`, url),
+		}
+	}
+	return urlParts, nil
 }
