@@ -15,6 +15,7 @@ type ServerController interface {
 	ConfigureHttpServer(*go_http.Server)
 
 	HandleRequest(*go_http.Request, []string, User) Resolution
+	MessageSummary(*go_http.Request, Resolution)
 
 	Login(user, password string) User
 	LoadSessions(SessionMap)
@@ -96,6 +97,8 @@ func (srv *Server) ServeHTTP(out go_http.ResponseWriter, req *go_http.Request) {
 			req.URL.EscapedPath(),
 			req.URL.RawQuery),
 		resolution.LogMessage())
+
+	srv.ctrl.MessageSummary(req, resolution)
 }
 
 func (srv *Server) handleRequest(req *go_http.Request, cookies *[]*go_http.Cookie) (resolution Resolution) {

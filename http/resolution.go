@@ -11,7 +11,10 @@ import (
 
 type Resolution interface {
 	WriteResponse(go_http.ResponseWriter, *go_http.Request)
+
 	LogMessage() log.Message
+	Size() int64
+	StatusCode() int
 }
 
 // ------------------------------------------------------------
@@ -25,8 +28,8 @@ func (res *ContentResolution) WriteResponse(out go_http.ResponseWriter, req *go_
 	if len(res.ContentType) > 0 {
 		out.Header().Set("Content-Type", res.ContentType)
 	}
-	out.Header().Set("Content-Length", fmt.Sprintf("%d", len(res.Content)))
-	if len(res.Content) > 0 {
+	out.Header().Set("Content-Length", fmt.Sprintf("%d", res.Size()))
+	if res.Size() > 0 {
 		out.Write(res.Content)
 	} else {
 		out.WriteHeader(go_http.StatusNoContent)
@@ -34,7 +37,19 @@ func (res *ContentResolution) WriteResponse(out go_http.ResponseWriter, req *go_
 }
 
 func (res *ContentResolution) LogMessage() log.Message {
-	return log.DebugMsg("%d bytes", len(res.Content))
+	return log.DebugMsg("%d bytes", res.Size())
+}
+
+func (res *ContentResolution) Size() int64 {
+	return int64(len(res.Content))
+}
+
+func (res *ContentResolution) StatusCode() int {
+	if res.Size() > 0 {
+		return go_http.StatusOK
+	} else {
+		return go_http.StatusNoContent
+	}
 }
 
 // ------------------------------------------------------------
@@ -44,6 +59,7 @@ type FileResolution struct {
 	contentType string
 	maxAge      int
 	modTime     time.Time
+	fileSize    int64
 	content     *os.File
 }
 
@@ -80,6 +96,7 @@ func ServeFile(req *go_http.Request, fileName string, contentType string, maxAge
 		contentType: contentType,
 		maxAge:      maxAge,
 		modTime:     info.ModTime(),
+		fileSize:    info.Size(),
 		content:     content,
 	}
 }
@@ -99,6 +116,18 @@ func (res *FileResolution) LogMessage() log.Message {
 	return log.DebugMsg(`File "%s"`, res.fileName)
 }
 
+func (res *FileResolution) Size() int64 {
+	return res.fileSize
+}
+
+func (res *FileResolution) StatusCode() int {
+	if res.Size() > 0 {
+		return go_http.StatusOK
+	} else {
+		return go_http.StatusNoContent
+	}
+}
+
 // ------------------------------------------------------------
 
 type RedirectResolution struct {
@@ -112,6 +141,14 @@ func (res *RedirectResolution) WriteResponse(out go_http.ResponseWriter, req *go
 
 func (res *RedirectResolution) LogMessage() log.Message {
 	return log.DebugMsg(`Redirect "%s"`, res.Url)
+}
+
+func (res *RedirectResolution) Size() int64 {
+	return 0
+}
+
+func (res *RedirectResolution) StatusCode() int {
+	return res.Status
 }
 
 // ------------------------------------------------------------
@@ -148,6 +185,14 @@ func (res *ErrorResolution) LogMessage() log.Message {
 	}
 }
 
+func (res *ErrorResolution) Size() int64 {
+	return 0
+}
+
+func (res *ErrorResolution) StatusCode() int {
+	return res.Status
+}
+
 // ------------------------------------------------------------
 
 type MethodNotAllowedResolution struct {
@@ -165,4 +210,12 @@ func (res *MethodNotAllowedResolution) LogMessage() log.Message {
 	return log.WarningMsg("%d %s",
 		go_http.StatusMethodNotAllowed,
 		go_http.StatusText(go_http.StatusMethodNotAllowed))
+}
+
+func (res *MethodNotAllowedResolution) Size() int64 {
+	return 0
+}
+
+func (res *MethodNotAllowedResolution) StatusCode() int {
+	return go_http.StatusMethodNotAllowed
 }
