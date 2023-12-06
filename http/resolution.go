@@ -20,8 +20,9 @@ type Resolution interface {
 // ------------------------------------------------------------
 
 type ContentResolution struct {
-	ContentType string
-	Content     []byte
+	CacheControl string
+	ContentType  string
+	Content      []byte
 }
 
 func (res *ContentResolution) WriteResponse(out go_http.ResponseWriter, req *go_http.Request) {
@@ -29,6 +30,9 @@ func (res *ContentResolution) WriteResponse(out go_http.ResponseWriter, req *go_
 		out.Header().Set("Content-Type", res.ContentType)
 	}
 	out.Header().Set("Content-Length", fmt.Sprintf("%d", res.Size()))
+	if len(res.CacheControl) > 0 {
+		out.Header().Set("Cache-Control", res.CacheControl)
+	}
 	if res.Size() > 0 {
 		out.Write(res.Content)
 	} else {
@@ -218,4 +222,35 @@ func (res *MethodNotAllowedResolution) Size() int64 {
 
 func (res *MethodNotAllowedResolution) StatusCode() int {
 	return go_http.StatusMethodNotAllowed
+}
+
+// ------------------------------------------------------------
+
+type WebSocketResolution struct {
+	Handler func(go_http.ResponseWriter, *go_http.Request) bool
+	success bool
+}
+
+func (res *WebSocketResolution) WriteResponse(out go_http.ResponseWriter, req *go_http.Request) {
+	res.success = res.Handler != nil && res.Handler(out, req)
+}
+
+func (res *WebSocketResolution) LogMessage() log.Message {
+	if res.success {
+		return log.DebugMsg(`WebSocket`)
+	} else {
+		return log.ErrorMsg(`WebSocket ERROR`)
+	}
+}
+
+func (res *WebSocketResolution) Size() int64 {
+	return 0
+}
+
+func (res *WebSocketResolution) StatusCode() int {
+	if res.success {
+		return go_http.StatusSwitchingProtocols
+	} else {
+		return go_http.StatusInternalServerError
+	}
 }
