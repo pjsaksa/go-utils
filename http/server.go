@@ -88,16 +88,6 @@ func (srv *Server) ServeHTTP(out go_http.ResponseWriter, req *go_http.Request) {
 	}
 	resolution.WriteResponse(out, req)
 
-	// Print log message
-	log.LOG(
-		log.EventMsg(
-			"[%s] %s %s %s",
-			req.RemoteAddr,
-			req.Method,
-			req.URL.EscapedPath(),
-			req.URL.RawQuery),
-		resolution.LogMessage())
-
 	srv.ctrl.MessageSummary(req, resolution)
 }
 
