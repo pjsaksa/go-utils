@@ -1,6 +1,8 @@
 package http
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	go_http "net/http"
 	"os"
@@ -19,20 +21,50 @@ type Resolution interface {
 
 // ------------------------------------------------------------
 
+type EncodingType int
+
+const (
+	EncodingNone EncodingType = iota
+	EncodingGzip
+)
+
+type Header struct {
+	Name  string
+	Value string
+}
+
+// ------------------------------------------------------------
+
 type ContentResolution struct {
-	CacheControl string
-	ContentType  string
-	Content      []byte
+	ContentType string
+	Content     []byte
+	Headers     []Header
+	Encoding    EncodingType
 }
 
 func (res *ContentResolution) WriteResponse(out go_http.ResponseWriter, req *go_http.Request) {
+	for idx := range res.Headers {
+		out.Header().Set(
+			res.Headers[idx].Name,
+			res.Headers[idx].Value,
+		)
+	}
 	if len(res.ContentType) > 0 {
 		out.Header().Set("Content-Type", res.ContentType)
 	}
-	out.Header().Set("Content-Length", fmt.Sprintf("%d", res.Size()))
-	if len(res.CacheControl) > 0 {
-		out.Header().Set("Cache-Control", res.CacheControl)
+	switch res.Encoding {
+	case EncodingGzip:
+		if res.Size() > 0 {
+			gzBuf := &bytes.Buffer{}
+			gzOut := gzip.NewWriter(gzBuf)
+			gzOut.Write(res.Content)
+			gzOut.Close()
+			res.Content = gzBuf.Bytes()
+
+			out.Header().Set("Content-Encoding", "gzip")
+		}
 	}
+	out.Header().Set("Content-Length", fmt.Sprintf("%d", res.Size()))
 	if res.Size() > 0 {
 		out.Write(res.Content)
 	} else {
@@ -59,12 +91,12 @@ func (res *ContentResolution) StatusCode() int {
 // ------------------------------------------------------------
 
 type FileResolution struct {
-	fileName    string
-	contentType string
-	maxAge      int
-	modTime     time.Time
-	fileSize    int64
-	content     *os.File
+	FileName    string
+	ContentType string
+	MaxAge      int
+	ModTime     time.Time
+	FileSize    int64
+	Content     *os.File
 }
 
 func ServeFile(req *go_http.Request, fileName string, contentType string, maxAge int) Resolution {
@@ -96,32 +128,32 @@ func ServeFile(req *go_http.Request, fileName string, contentType string, maxAge
 	}
 
 	return &FileResolution{
-		fileName:    fileName,
-		contentType: contentType,
-		maxAge:      maxAge,
-		modTime:     info.ModTime(),
-		fileSize:    info.Size(),
-		content:     content,
+		FileName:    fileName,
+		ContentType: contentType,
+		MaxAge:      maxAge,
+		ModTime:     info.ModTime(),
+		FileSize:    info.Size(),
+		Content:     content,
 	}
 }
 
 func (res *FileResolution) WriteResponse(out go_http.ResponseWriter, req *go_http.Request) {
-	if len(res.contentType) > 0 {
-		out.Header().Set("Content-Type", res.contentType)
+	if len(res.ContentType) > 0 {
+		out.Header().Set("Content-Type", res.ContentType)
 	}
-	if res.maxAge > 0 {
-		out.Header().Set("Cache-Control", fmt.Sprintf("max-age=%d", res.maxAge))
+	if res.MaxAge > 0 {
+		out.Header().Set("Cache-Control", fmt.Sprintf("max-age=%d", res.MaxAge))
 	}
 
-	go_http.ServeContent(out, req, res.fileName, res.modTime, res.content)
+	go_http.ServeContent(out, req, res.FileName, res.ModTime, res.Content)
 }
 
 func (res *FileResolution) LogMessage() log.Message {
-	return log.DebugMsg(`File "%s"`, res.fileName)
+	return log.DebugMsg(`File "%s"`, res.FileName)
 }
 
 func (res *FileResolution) Size() int64 {
-	return res.fileSize
+	return res.FileSize
 }
 
 func (res *FileResolution) StatusCode() int {
