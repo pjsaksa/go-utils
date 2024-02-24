@@ -43,11 +43,14 @@ func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Re
 
 			log.INFO("Sign-in '%s'", u)
 
+			cookieInfo := srv.ctrl.SessionDetails()
 			*cookies = append(*cookies, &go_http.Cookie{
-				Name:   srv.ctrl.SessionCookieName(),
-				Value:  token,
-				Path:   "/",
-				MaxAge: int(srv.ctrl.SessionMaxAge().Seconds()),
+				Name:     cookieInfo.Name,
+				Value:    token,
+				Path:     "/",
+				MaxAge:   int(cookieInfo.MaxAge.Seconds()),
+				Secure:   cookieInfo.Secure,
+				HttpOnly: cookieInfo.HttpOnly,
 			})
 
 			return &RedirectResolution{
@@ -78,11 +81,13 @@ func (srv *Server) doSignOut(req *go_http.Request, cookies *[]*go_http.Cookie, a
 
 	log.INFO("Sign-out '%s'", activeUser.Username())
 
+	cookieInfo := srv.ctrl.SessionDetails()
 	*cookies = append(*cookies, &go_http.Cookie{
-		Name:   srv.ctrl.SessionCookieName(),
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
+		Name:     cookieInfo.Name,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: cookieInfo.HttpOnly,
 	})
 
 	return &RedirectResolution{
@@ -92,7 +97,8 @@ func (srv *Server) doSignOut(req *go_http.Request, cookies *[]*go_http.Cookie, a
 }
 
 func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cookie) (User, string) {
-	if cookie, err := req.Cookie(srv.ctrl.SessionCookieName()); err != go_http.ErrNoCookie && cookie != nil && len(cookie.Value) > 0 {
+	cookieInfo := srv.ctrl.SessionDetails()
+	if cookie, err := req.Cookie(cookieInfo.Name); err != go_http.ErrNoCookie && cookie != nil && len(cookie.Value) > 0 {
 		srv.sessionsMutex.Lock()
 		defer srv.sessionsMutex.Unlock()
 
@@ -113,7 +119,7 @@ func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cook
 			ok = false
 		}
 
-		if ok && time.Since(session.RefreshTime) > srv.ctrl.SessionMaxAge() {
+		if ok && time.Since(session.RefreshTime) > cookieInfo.MaxAge {
 			// Session has expired
 			log.INFO("Session expired '%s'", session.User.Username())
 
@@ -127,10 +133,12 @@ func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cook
 				srv.ctrl.RefreshSession(cookie.Value, srv.sessions)
 
 				*cookies = append(*cookies, &go_http.Cookie{
-					Name:   srv.ctrl.SessionCookieName(),
-					Value:  cookie.Value,
-					Path:   "/",
-					MaxAge: int(srv.ctrl.SessionMaxAge().Seconds()),
+					Name:     cookieInfo.Name,
+					Value:    cookie.Value,
+					Path:     "/",
+					MaxAge:   int(cookieInfo.MaxAge.Seconds()),
+					Secure:   cookieInfo.Secure,
+					HttpOnly: cookieInfo.HttpOnly,
 				})
 			}
 
@@ -141,10 +149,11 @@ func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cook
 			// caused the session to be rejected
 
 			*cookies = append(*cookies, &go_http.Cookie{
-				Name:   srv.ctrl.SessionCookieName(),
-				Value:  "",
-				Path:   "/",
-				MaxAge: -1,
+				Name:     cookieInfo.Name,
+				Value:    "",
+				Path:     "/",
+				MaxAge:   -1,
+				HttpOnly: cookieInfo.HttpOnly,
 			})
 
 			panic(&RedirectResolution{

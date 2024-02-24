@@ -10,8 +10,7 @@ import (
 
 type ServerController interface {
 	BindAddress() string
-	SessionCookieName() string
-	SessionMaxAge() time.Duration
+	SessionDetails() SessionDetails
 	ConfigureHttpServer(*go_http.Server)
 
 	HandleRequest(*go_http.Request, []string, User) Resolution
@@ -32,6 +31,13 @@ type Session struct {
 }
 
 type SessionMap map[string]*Session
+
+type SessionDetails struct {
+	Name     string
+	MaxAge   time.Duration
+	Secure   bool
+	HttpOnly bool
+}
 
 // ------------------------------------------------------------
 
