@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	go_http "net/http"
 	"sync"
 	"time"
@@ -78,6 +79,10 @@ func (srv *Server) StartTLS(certFile, keyFile string) {
 	if err := srv.httpServer.ListenAndServeTLS(certFile, keyFile); err != go_http.ErrServerClosed {
 		panic(err.Error())
 	}
+}
+
+func (srv *Server) Shutdown() {
+	srv.httpServer.Shutdown(context.Background())
 }
 
 // ------------------------------------------------------------
