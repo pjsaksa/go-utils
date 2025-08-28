@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	go_http "net/http"
-	"sync"
 	"time"
 
 	"github.com/pjsaksa/go-utils/log"
@@ -18,20 +17,25 @@ type ServerController interface {
 	MessageSummary(*go_http.Request, Resolution)
 
 	Login(user, password string) User
-	LoadSessions(SessionMap)
-	RefreshSession(string, SessionMap)
+	NewSession(user User, token string) error
+	GetSession(string) (Session, bool)
+	DeleteSession(string)
 }
 
 type User interface {
 	Username() string
 }
 
-type Session struct {
-	User        User
-	RefreshTime time.Time
-}
+type Session interface {
+	User() User
+	VerifyToken(string) bool
 
-type SessionMap map[string]*Session
+	RefreshTime() time.Time
+	SetRefreshTime(time.Time)
+
+	Address() string
+	UserAgent() string
+}
 
 type SessionDetails struct {
 	Name     string
@@ -43,19 +47,14 @@ type SessionDetails struct {
 // ------------------------------------------------------------
 
 type Server struct {
-	ctrl          ServerController
-	httpServer    go_http.Server
-	sessions      SessionMap
-	sessionsMutex sync.Mutex
+	ctrl       ServerController
+	httpServer go_http.Server
 }
 
 func NewServer(ctrl ServerController) *Server {
 	srv := &Server{
-		ctrl:     ctrl,
-		sessions: SessionMap{},
+		ctrl: ctrl,
 	}
-
-	ctrl.LoadSessions(srv.sessions)
 
 	srv.httpServer = go_http.Server{
 		Addr:           srv.ctrl.BindAddress(),
@@ -132,13 +131,12 @@ func (srv *Server) handleRequest(req *go_http.Request, cookies *[]*go_http.Cooki
 	}
 
 	resolution = &ErrorResolution{Status: go_http.StatusNotFound}
-
 	return
 }
 
 func (srv *Server) handleSessions(urlParts []string, req *go_http.Request, cookies *[]*go_http.Cookie) (User, Resolution) {
 	// Check if request contains session information.
-	sessionUser, sessionCookie := srv.getOpenSession(req, cookies)
+	sessionUser, sessionKey := srv.getOpenSession(req, cookies)
 
 	if urlParts[0] == "u" {
 		// User-specific page handler.
@@ -148,7 +146,7 @@ func (srv *Server) handleSessions(urlParts []string, req *go_http.Request, cooki
 		}
 
 		if UrlPartsMatch(urlParts, "u", "sign-out") {
-			return nil, srv.doSignOut(req, cookies, sessionUser, sessionCookie)
+			return nil, srv.doSignOut(req, cookies, sessionUser, sessionKey)
 		}
 	} else {
 		if UrlPartsMatch(urlParts, "sign-in") {

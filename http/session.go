@@ -10,6 +10,12 @@ import (
 	"github.com/pjsaksa/go-utils/log"
 )
 
+const (
+	SessionTokenSize  = 36 // bytes
+	SessionCookieSize = 48 // bytes in base64
+	SessionKeySize    = 12 // in base64
+)
+
 func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Resolution {
 	if req.Method != "POST" {
 		return &MethodNotAllowedResolution{Allowed: "POST"}
@@ -21,25 +27,22 @@ func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Re
 		if user := srv.ctrl.Login(u, p); user != nil {
 			var token string
 
-			// Mutex-zone
-			func() {
-				srv.sessionsMutex.Lock()
-				defer srv.sessionsMutex.Unlock()
-
-				// Create tokens until a fresh one is found
-				for {
-					token = newSessionToken()
-					if _, exists := srv.sessions[token]; !exists {
-						break
-					}
+			// Create tokens until a fresh one is found
+			for {
+				token = newSessionToken()
+				if _, exists := srv.ctrl.GetSession(token[:SessionKeySize]); !exists {
+					break
 				}
+			}
 
-				srv.sessions[token] = &Session{
-					User:        user,
-					RefreshTime: time.Now(),
-				}
-				srv.ctrl.RefreshSession(token, srv.sessions)
-			}()
+			err := srv.ctrl.NewSession(user, token)
+			if err != nil {
+				log.ERROR("NewSession: %s", err)
+				panic(&ErrorResolution{
+					Status:  go_http.StatusInternalServerError,
+					Message: fmt.Sprintf("Internal server error: %s", err),
+				})
+			}
 
 			log.INFO("Sign-in '%s'", u)
 
@@ -65,20 +68,12 @@ func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Re
 	}
 }
 
-func (srv *Server) doSignOut(req *go_http.Request, cookies *[]*go_http.Cookie, activeUser User, activeCookie string) Resolution {
+func (srv *Server) doSignOut(req *go_http.Request, cookies *[]*go_http.Cookie, activeUser User, sessionKey string) Resolution {
 	if req.Method != "POST" {
 		return &MethodNotAllowedResolution{Allowed: "POST"}
 	}
 
-	// Mutex-zone
-	func() {
-		srv.sessionsMutex.Lock()
-		defer srv.sessionsMutex.Unlock()
-
-		delete(srv.sessions, activeCookie)
-		srv.ctrl.RefreshSession(activeCookie, srv.sessions)
-	}()
-
+	srv.ctrl.DeleteSession(sessionKey)
 	log.INFO("Sign-out '%s'", activeUser.Username())
 
 	cookieInfo := srv.ctrl.SessionDetails()
@@ -99,38 +94,43 @@ func (srv *Server) doSignOut(req *go_http.Request, cookies *[]*go_http.Cookie, a
 func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cookie) (User, string) {
 	cookieInfo := srv.ctrl.SessionDetails()
 	if cookie, err := req.Cookie(cookieInfo.Name); err != go_http.ErrNoCookie && cookie != nil && len(cookie.Value) > 0 {
-		srv.sessionsMutex.Lock()
-		defer srv.sessionsMutex.Unlock()
+		var session Session
+		var key string
 
-		session, ok := srv.sessions[cookie.Value]
-		if !ok {
-			log.WARNING("Requested session not found")
+		ok := len(cookie.Value) == SessionCookieSize
+
+		if ok {
+			key = cookie.Value[:SessionKeySize]
+			session, ok = srv.ctrl.GetSession(key)
+			if !ok {
+				log.WARNING("Requested session not found")
+			}
 		}
 
 		if ok && session == nil {
-			// SessionMap contains nil entry. Make noise because this needs to
-			// be tracked down.
-			log.ERROR(`http.Server.getOpenSession: "sessions" had nil entry: %s`, cookie.Value)
-
-			// Delete invalid session entry
-			delete(srv.sessions, cookie.Value)
-			srv.ctrl.RefreshSession(cookie.Value, srv.sessions)
+			// Found nil Session. Make noise:
+			log.ERROR(`http.Server.getOpenSession: "sessions" had nil entry: %s`, key)
+			srv.ctrl.DeleteSession(key)
 
 			ok = false
 		}
 
-		if ok && time.Since(session.RefreshTime) > cookieInfo.MaxAge {
-			// Session has expired
-			log.INFO("Session expired '%s'", session.User.Username())
+		if ok && !session.VerifyToken(cookie.Value) {
+			log.WARNING("Session key, verification fail: %q", key)
+
+			ok = false
+		}
+
+		if ok && time.Since(session.RefreshTime()) > cookieInfo.MaxAge {
+			log.INFO("Session expired '%s'", session.User().Username())
 
 			ok = false
 		}
 
 		if ok {
 			// Refresh session (unless it's fresh enough)
-			if time.Since(session.RefreshTime) > time.Hour {
-				session.RefreshTime = time.Now()
-				srv.ctrl.RefreshSession(cookie.Value, srv.sessions)
+			if time.Since(session.RefreshTime()) > time.Hour {
+				session.SetRefreshTime(time.Now())
 
 				*cookies = append(*cookies, &go_http.Cookie{
 					Name:     cookieInfo.Name,
@@ -143,7 +143,7 @@ func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cook
 			}
 
 			// Return valid user information
-			return session.User, cookie.Value
+			return session.User(), key
 		} else {
 			// Request contained a session cookie but one of the above checks
 			// caused the session to be rejected
@@ -169,11 +169,7 @@ func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cook
 // ------------------------------------------------------------
 
 func newSessionToken() string {
-	const (
-		sessionTokenSize = 24 // 24 bytes => 32 in base64
-	)
-
-	var data [sessionTokenSize]byte
+	var data [SessionTokenSize]byte
 	n, err := rand.Read(data[:])
 	switch {
 	case err != nil:
@@ -181,7 +177,7 @@ func newSessionToken() string {
 			Status:  go_http.StatusInternalServerError,
 			Message: fmt.Sprintf("http.newSessionToken: %s", err.Error()),
 		})
-	case n != sessionTokenSize:
+	case n != SessionTokenSize:
 		panic(&ErrorResolution{
 			Status:  go_http.StatusInternalServerError,
 			Message: fmt.Sprintf("http.newSessionToken: invalid number of output bytes"),
