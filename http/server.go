@@ -17,7 +17,7 @@ type ServerController interface {
 	MessageSummary(*go_http.Request, Resolution)
 
 	Login(user, password string) User
-	NewSession(user User, token string) error
+	NewSession(user User) (string, error)
 	GetSession(string) (Session, bool)
 	DeleteSession(string)
 }
@@ -27,6 +27,8 @@ type User interface {
 }
 
 type Session interface {
+	Unlock()
+
 	User() User
 	VerifyToken(string) bool
 
@@ -42,6 +44,9 @@ type SessionDetails struct {
 	MaxAge   time.Duration
 	Secure   bool
 	HttpOnly bool
+
+	CookieSize int
+	KeySize    int
 }
 
 // ------------------------------------------------------------

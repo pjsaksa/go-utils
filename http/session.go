@@ -1,19 +1,11 @@
 package http
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	go_http "net/http"
 	"time"
 
 	"github.com/pjsaksa/go-utils/log"
-)
-
-const (
-	SessionTokenSize  = 36 // bytes
-	SessionCookieSize = 48 // bytes in base64
-	SessionKeySize    = 12 // in base64
 )
 
 func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Resolution {
@@ -25,17 +17,7 @@ func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Re
 	p := req.PostFormValue("password")
 	if u != "" {
 		if user := srv.ctrl.Login(u, p); user != nil {
-			var token string
-
-			// Create tokens until a fresh one is found
-			for {
-				token = newSessionToken()
-				if _, exists := srv.ctrl.GetSession(token[:SessionKeySize]); !exists {
-					break
-				}
-			}
-
-			err := srv.ctrl.NewSession(user, token)
+			token, err := srv.ctrl.NewSession(user)
 			if err != nil {
 				log.ERROR("NewSession: %s", err)
 				panic(&ErrorResolution{
@@ -97,11 +79,12 @@ func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cook
 		var session Session
 		var key string
 
-		ok := len(cookie.Value) == SessionCookieSize
+		ok := len(cookie.Value) == cookieInfo.CookieSize
 
 		if ok {
-			key = cookie.Value[:SessionKeySize]
+			key = cookie.Value[:cookieInfo.KeySize]
 			session, ok = srv.ctrl.GetSession(key)
+			defer session.Unlock()
 			if !ok {
 				log.WARNING("Requested session not found")
 			}
@@ -164,25 +147,4 @@ func (srv *Server) getOpenSession(req *go_http.Request, cookies *[]*go_http.Cook
 	}
 
 	return nil, ""
-}
-
-// ------------------------------------------------------------
-
-func newSessionToken() string {
-	var data [SessionTokenSize]byte
-	n, err := rand.Read(data[:])
-	switch {
-	case err != nil:
-		panic(&ErrorResolution{
-			Status:  go_http.StatusInternalServerError,
-			Message: fmt.Sprintf("http.newSessionToken: %s", err.Error()),
-		})
-	case n != SessionTokenSize:
-		panic(&ErrorResolution{
-			Status:  go_http.StatusInternalServerError,
-			Message: fmt.Sprintf("http.newSessionToken: invalid number of output bytes"),
-		})
-	}
-
-	return base64.StdEncoding.EncodeToString(data[:])
 }
