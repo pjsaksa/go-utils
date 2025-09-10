@@ -12,6 +12,13 @@ func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Re
 	if req.Method != "POST" {
 		return &MethodNotAllowedResolution{Allowed: "POST"}
 	}
+	if res := srv.ctrl.VerifyCsrf(
+		req.URL.EscapedPath(),
+		"",
+		req.PostFormValue("csrf"),
+	); res != nil {
+		return res
+	}
 
 	u := req.PostFormValue("user")
 	p := req.PostFormValue("password")
@@ -53,6 +60,13 @@ func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Re
 func (srv *Server) doSignOut(req *go_http.Request, cookies *[]*go_http.Cookie, activeUser User, sessionKey string) Resolution {
 	if req.Method != "POST" {
 		return &MethodNotAllowedResolution{Allowed: "POST"}
+	}
+	if res := srv.ctrl.VerifyCsrf(
+		req.URL.EscapedPath(),
+		activeUser.Username(),
+		req.PostFormValue("csrf"),
+	); res != nil {
+		return res
 	}
 
 	srv.ctrl.DeleteSession(sessionKey)

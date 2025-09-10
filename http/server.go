@@ -20,6 +20,8 @@ type ServerController interface {
 	NewSession(user User) (string, error)
 	GetSession(string) (Session, bool)
 	DeleteSession(string)
+
+	VerifyCsrf(string, string, string) Resolution
 }
 
 type User interface {
