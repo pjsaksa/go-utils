@@ -43,6 +43,7 @@ func (srv *Server) doSignIn(req *go_http.Request, cookies *[]*go_http.Cookie) Re
 				MaxAge:   int(cookieInfo.MaxAge.Seconds()),
 				Secure:   cookieInfo.Secure,
 				HttpOnly: cookieInfo.HttpOnly,
+				SameSite: cookieInfo.SameSite,
 			})
 
 			return &RedirectResolution{

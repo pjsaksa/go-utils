@@ -46,6 +46,7 @@ type SessionDetails struct {
 	MaxAge   time.Duration
 	Secure   bool
 	HttpOnly bool
+	SameSite go_http.SameSite
 
 	CookieSize int
 	KeySize    int
