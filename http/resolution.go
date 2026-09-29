@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/pjsaksa/go-utils/http/csp"
 	"github.com/pjsaksa/go-utils/log"
 )
 
@@ -40,6 +41,8 @@ type ContentResolution struct {
 	Content     []byte
 	Headers     []Header
 	Encoding    EncodingType
+	BaseCSP     *csp.Policy
+	PageCSP     *csp.Policy
 }
 
 func (res *ContentResolution) WriteResponse(out go_http.ResponseWriter, req *go_http.Request) {
@@ -65,6 +68,11 @@ func (res *ContentResolution) WriteResponse(out go_http.ResponseWriter, req *go_
 		}
 	}
 	out.Header().Set("Content-Length", fmt.Sprintf("%d", res.Size()))
+	if res.BaseCSP != nil || res.PageCSP != nil {
+		if val := csp.Output(res.BaseCSP, res.PageCSP); len(val) > 0 {
+			out.Header().Set("Content-Security-Policy", val)
+		}
+	}
 	if res.Size() > 0 {
 		out.Write(res.Content)
 	} else {
