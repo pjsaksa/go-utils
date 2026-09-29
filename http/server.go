@@ -57,11 +57,15 @@ type SessionDetails struct {
 type Server struct {
 	ctrl       ServerController
 	httpServer go_http.Server
+
+	shutdownComplete chan struct{}
 }
 
 func NewServer(ctrl ServerController) *Server {
 	srv := &Server{
 		ctrl: ctrl,
+
+		shutdownComplete: make(chan struct{}),
 	}
 
 	srv.httpServer = go_http.Server{
@@ -79,6 +83,7 @@ func (srv *Server) Start() {
 	if err := srv.httpServer.ListenAndServe(); err != go_http.ErrServerClosed {
 		panic(err.Error())
 	}
+	close(srv.shutdownComplete)
 }
 
 func (srv *Server) StartTLS(certFile, keyFile string) {
@@ -86,10 +91,15 @@ func (srv *Server) StartTLS(certFile, keyFile string) {
 	if err := srv.httpServer.ListenAndServeTLS(certFile, keyFile); err != go_http.ErrServerClosed {
 		panic(err.Error())
 	}
+	close(srv.shutdownComplete)
 }
 
 func (srv *Server) Shutdown() {
 	srv.httpServer.Shutdown(context.Background())
+}
+
+func (srv *Server) WaitForShutdown() {
+	<-srv.shutdownComplete
 }
 
 // ------------------------------------------------------------
