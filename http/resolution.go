@@ -108,6 +108,23 @@ type FileResolution struct {
 }
 
 func ServeFile(req *go_http.Request, fileName string, contentType string, maxAge int) Resolution {
+	root, err := os.OpenRoot("/")
+	if err != nil {
+		return &ErrorResolution{
+			Status:  go_http.StatusInternalServerError,
+			Message: fmt.Sprintf(`http.ServeFile: os.OpenRoot("/"): %s`, err),
+		}
+	}
+	return ServeFileRoot(
+		req,
+		root,
+		fileName,
+		contentType,
+		maxAge,
+	)
+}
+
+func ServeFileRoot(req *go_http.Request, root *os.Root, fileName string, contentType string, maxAge int) Resolution {
 	if req.Method != "GET" {
 		return &MethodNotAllowedResolution{Allowed: "GET"}
 	}
@@ -117,7 +134,7 @@ func ServeFile(req *go_http.Request, fileName string, contentType string, maxAge
 
 	var info os.FileInfo
 	var err error
-	info, err = os.Stat(fileName)
+	info, err = root.Stat(fileName)
 	switch {
 	case err != nil:
 		return &ErrorResolution{Status: go_http.StatusNotFound}
@@ -126,12 +143,12 @@ func ServeFile(req *go_http.Request, fileName string, contentType string, maxAge
 	}
 
 	var content *os.File
-	content, err = os.Open(fileName)
+	content, err = root.Open(fileName)
 	switch {
 	case err != nil:
 		return &ErrorResolution{
 			Status:  go_http.StatusInternalServerError,
-			Message: fmt.Sprintf("http.ServeFile: os.Open: ", err.Error()),
+			Message: fmt.Sprintf("http.ServeFileRoot: os.Root.Open: %s", err),
 		}
 	}
 
