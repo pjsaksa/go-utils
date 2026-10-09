@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"net"
 	go_http "net/http"
 	"time"
 
@@ -89,6 +90,14 @@ func (srv *Server) Start() {
 func (srv *Server) StartTLS(certFile, keyFile string) {
 	log.INFO("Listening HTTPS at %s", srv.httpServer.Addr)
 	if err := srv.httpServer.ListenAndServeTLS(certFile, keyFile); err != go_http.ErrServerClosed {
+		panic(err.Error())
+	}
+	close(srv.shutdownComplete)
+}
+
+func (srv *Server) ServeTLS(ln net.Listener, certFile, keyFile string) {
+	log.INFO("Listening HTTPS at %s", ln.Addr())
+	if err := srv.httpServer.ServeTLS(ln, certFile, keyFile); err != go_http.ErrServerClosed {
 		panic(err.Error())
 	}
 	close(srv.shutdownComplete)

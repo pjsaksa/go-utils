@@ -46,7 +46,7 @@ func Test_SplitUrlPath(t *testing.T) {
 	}
 
 	for i := range data {
-		if output := splitUrlPath(data[i].input); !compareUrlParts(output, data[i].want) {
+		if output, _ := splitUrlPath(data[i].input); !compareUrlParts(output, data[i].want) {
 			t.Errorf("FAIL: \"%s\"\n-> %q\n!= %q",
 				data[i].input,
 				output,
@@ -66,7 +66,7 @@ func compareUrlParts(a []string, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := 0; i < len(a); i++ {
+	for i := range len(a) {
 		if a[i] != b[i] {
 			return false
 		}
